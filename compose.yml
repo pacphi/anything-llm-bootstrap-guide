@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: anythingllm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dbuser
+      POSTGRES_DB: dbname
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ${POSTGRES_STORAGE}:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbuser -d dbname"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
+  anythingllm:
+    image: mintplexlabs/anythingllm:pg
+    container_name: anythingllm
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3001"
+    cap_add:
+      - SYS_ADMIN
+    secrets:
+      - postgres_password
+    environment:
+      STORAGE_DIR: /app/server/storage
+      DB_USER: dbuser
+      DB_NAME: dbname
+      DB_HOST: postgres
+      DB_PORT: "5432"
+    entrypoint: ["/bin/bash", "/entrypoint/anythingllm-entrypoint.sh"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${ANYTHINGLLM_STORAGE}:/app/server/storage
+      - ${ANYTHINGLLM_STORAGE}/.env:/app/server/.env
+      - ./scripts/anythingllm-entrypoint.sh:/entrypoint/anythingllm-entrypoint.sh:ro
+    networks:
+      - backend
+
+  proxy:
+    image: caddy:2
+    container_name: anythingllm-proxy
+    restart: unless-stopped
+    depends_on:
+      - anythingllm
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${CADDYFILE_PATH}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - backend
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  backend:
+    driver: bridge

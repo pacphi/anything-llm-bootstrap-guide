@@ -1,0 +1,4 @@
+.env
+secrets/postgres_password.txt
+storage/
+Caddyfile.public
